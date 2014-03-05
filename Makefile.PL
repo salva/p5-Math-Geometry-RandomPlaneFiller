@@ -1,12 +1,10 @@
-use 5.018002;
+use 5.010;
 use ExtUtils::MakeMaker;
-# See lib/ExtUtils/MakeMaker.pm for details of how to influence
-# the contents of the Makefile that is written.
-WriteMakefile(
-    NAME              => 'Math::Geometry::RandomPlaneFiller',
-    VERSION_FROM      => 'lib/Math/Geometry/RandomPlaneFiller.pm', # finds $VERSION
-    PREREQ_PM         => {}, # e.g., Module::Name => 1.1
-    ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
-      (ABSTRACT_FROM  => 'lib/Math/Geometry/RandomPlaneFiller.pm', # retrieve abstract from module
-       AUTHOR         => 'Salvador Fandiño <salva@>') : ()),
+
+WriteMakefile( NAME           => 'Math::Geometry::RandomPlaneFiller',
+               VERSION_FROM   => 'lib/Math/Geometry/RandomPlaneFiller.pm',
+               PREREQ_PM      => { 'Math::Vector::Real' => '0.11',
+                                   'Math::Geometry::IntersectionArea' => 0, },
+               ABSTRACT_FROM  => 'lib/Math/Geometry/RandomPlaneFiller.pm',
+               AUTHOR         => 'Salvador Fandiño <sfandino@yahoo.com>',
 );
