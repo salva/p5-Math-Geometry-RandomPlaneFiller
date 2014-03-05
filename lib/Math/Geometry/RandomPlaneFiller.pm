@@ -5,17 +5,53 @@ our $VERSION = '0.01';
 use 5.010;
 use strict;
 use warnings;
-
-
+use Scalar::Util qw();
+use Math::Vector::Real;
 
 sub new {
     my ($class, %opts) = @_;
     my $o = delete $opts{o} // [0, 0];
+    $o = V(@$o); # promote to Math::Vector::Real
     my $d = delete $opts{d} // [1, 1];
     my ($o0, $o1) = Math::Vector::Real->box($o, $o + $d);
-    my $self = { root => Math::Geometry::RandomPlaneFiller::Region->new($o0, $o1) };
+    my $self = { root => Math::Geometry::RandomPlaneFiller::Region->new($o0, $o1),
+                 max_dist => ($o1 - $o0)->norm,
+               };
     bless $self, $class;
 }
+
+sub random_free_point {
+    my $self = shift;
+    my $root = $self->{root};
+    return if $root->is_full;
+    $root->random_free_point;
+}
+
+sub find_touching {
+    my ($self, $shape) = @_;
+    my $t = $self->{root}->find_touching($shape);
+    (wantarray ? @$t : $t->[0]);
+}
+
+sub insert {
+    my ($self, $shape) = @_;
+    $self->{root}->insert($shape);
+}
+
+sub draw_regions {
+    my ($self, $cb) = @_;
+    $self->{root}->draw_regions($cb);
+}
+
+sub find_nearest_to_point {
+    my ($self, $p, $n, $max_dist) = @_;
+    my $root = $self->[root];
+    $n //= 1;
+    $max_dist //= $self->{max_dist};
+    my $n = $self->[root]->find_nearest_to_point($p, $n, $max_dist * $max_dist);
+    wantarray ? @$n : $n->[0];
+}
+
 
 package Math::Geometry::RandomPlaneFiller::Shape;
 
@@ -24,9 +60,19 @@ sub area_of_intersection_with_rectangle {
     die "virtual method area_of_intersection_with_rectangle not implemented by class '$class'";
 }
 
-sub is_touching {
+sub is_touching_point {
     my $class = ref(shift);
-    die "virtual method is_touching not implemented by class '$class'";
+    die "virtual method is_touching_point not implemented by class '$class'";
+}
+
+sub is_touching_shape {
+    my $class = ref(shift);
+    die "virtual method is_touching_shape not implemented by class '$class'";
+}
+
+sub is_touching_rectangle {
+    my $class = ref(shift);
+    die "virtual method is_touching_rectangle not implemented by class '$class'";
 }
 
 sub distante_to_shape {
@@ -39,8 +85,15 @@ sub distance_to_rectangle {
     die "virtual method distance_to_rectangle not implemented by class '$class'";
 }
 
+sub distance_to_point {
+    my $class = ref(shift);
+    die "virtual method distance_to_point not implemented by class '$class'";
+}
+
 package Math::Geometry::RandomPlaneFiller::Shape::Circle;
 our @ISA = qw(Math::Geometry::RandomPlaneFiller::Shape);
+
+use Math::Geometry::IntersectionArea;
 
 use constant o     => 0;
 use constant r     => 1;
@@ -49,7 +102,7 @@ use constant slots => 2;
 sub new {
     my ($class, $o, $r) = @_;
     my $self = [];
-    @{$self}[o, r] = ($o, $r);
+    @{$self}[o, r] = (Math::Vector::Real::V(@$o), $r);
     bless $self, $class;
 }
 
@@ -58,29 +111,36 @@ sub area_of_intersection_with_rectangle {
     Math::Geometry::IntersectionArea::intersection_area_circle_rectangle($self->[o], $self->[r], @_);
 }
 
-sub is_touching {
+sub is_touching_shape {
     my ($self, $other) = @_;
     my $total = $self->[r] + $other->[r];
     $total * $total >= ($self->[o] - $other->[o])->norm2;
 }
 
+sub is_touching_point {
+    my ($self, $p) = @_;
+    my $r = $self->[r];
+    $self->[o]->dist2($p) < $r * $r;
+}
+
+sub distance_to_point {
+    my ($self, $p) = @_;
+    my $d = $self->[o]->dist2($p) - $self->[r];
+    $d < 0 ? 0 : $d;
+}
+
 sub distance_to_rectangle {
     my $self = shift;
-    my $n = V(@{$self->[o]});
-    if ($n->[0] < $o0->[0]) {
-        $n->[0] = $o0->[0];
-    }
-    elsif ($n->[0] > $o1->[0]) {
-        $n->[0] = $o1->[0]
-    }
-    if ($n->[1] < $o0->[1]) {
-        $n->[1] = $o0->[1];
-    }
-    elsif ($n->[1] > $o1->[1]) {
-        $n->[1] = $o1->[1];
-    }
+    my $n = $self->[c]->nearest_in_box(@_);
     my $d = $n->dist($self->[o]) - $self->[r];
     return ($d < 0 ? 0 : $d);
+}
+
+sub is_touching_rectangle {
+    my $self = shift;
+    my $n = $self->[c]->nearest_in_box(@_);
+    my $r = $self->[r];
+    $n->dist2($self->[o]) < $r * $r;
 }
 
 package Math::Geometry::RandomPlaneFiller::Region;
@@ -89,24 +149,79 @@ use constant max_shapes_per_region => 10;
 
 use constant o0    => 0; # corner 0
 use constant o1    => 1; # corner 1
-use constant free  => 2; # free area
-use constant objs  => 3; # objects
-use constant sel   => 4; # selector
-use constant sr0   => 5; # subregion 0
-use constant sr1   => 6; # subregion 1
-use constant slots => 7; #
+use constant iarea => 3; # inverse of total area
+use constant free  => 4; # free area
+use constant objs  => 5; # objects
+use constant sel   => 6; # selector
+use constant sr0   => 7; # subregion 0
+use constant sr1   => 8; # subregion 1
+use constant slots => 9; #
+
+sub is_full { shift->[free] <= 0 }
 
 sub new {
     my ($class, $o0, $o1) = @_;
-    my $o0 = shift;
-    my $o1 = shift;
     my $d = $o1 - $o0;
     my $area = 1;
     $area *= $_ for @$d;
+    my $iarea = 1 / ($area || 1);
     my $self = [];
-    @{$self}[o0, o1, free, objs] = ($o0, $o1, $area, []);
+    @{$self}[o0, o1, iarea, free, objs] = ($o0, $o1, $iarea ,$area, []);
     bless $self, $class;
     $self;
+}
+
+sub draw_regions {
+    my ($self, $cb) = @_;
+    if ($self->[objs]) {
+        $cb->($self->[o0], $self->[o1], $self->[free] * $self->[iarea]);
+    }
+    else {
+        $self->[sr0]->draw_regions($cb);
+        $self->[sr1]->draw_regions($cb);
+    }
+}
+
+sub random_free_point {
+    my $self = shift;
+    if (my $objs = $self->[objs]) {
+        if ($self->[free] * $self->[iarea] > 0.5) {
+            my $o0 = $self->[o0];
+            my $o1 = $self->[o1];
+        OUT: while (1) {
+                my $p = $o0 + ($o1 - $o0)->random_in_box;
+                for (@$objs) {
+                    next OUT if $_->is_touching_point($p)
+                }
+                return $p;
+            }
+        }
+        $self->_divide;
+    }
+
+    my $sr0 = $self->[sr0];
+    my $sr = ( (rand($self->[free]) < $sr0->[free])
+               ? $sr0
+               : $self->[sr1] );
+    $sr->random_free_point;
+}
+
+sub insert {
+    my $self = shift;
+    my $shape = shift;
+    my $o0 = $self->[o0];
+    my $o1 = $self->[o1];
+    if ($shape->is_touching_rectangle($o0, $o1)) {
+        if (my $objs = $self->[objs]) {
+            if (@$objs < max_shapes_per_region) {
+                push @$objs, $shape;
+                $self->[free] -= $shape->area_of_intersection_with_rectangle($o0, $o1);
+                return;
+            }
+            $self->_divide;
+        }
+        $self->_insert_into_subtrees($shape);
+    }
 }
 
 sub _divide {
@@ -114,37 +229,80 @@ sub _divide {
     my $objs = delete $self->[objs] or return;
     my $o0 = $self->[o0];
     my $o1 = $self->[o1];
-    my $diag = $o1 - $o0;
-    my $sel = ($d->[0] > $d->[1] ? 0 : 1);
-    my $middle = 0.5 * ($o0->[$sel] + $o1->[$sel]);
-    my $p0 = V(@$o1);
-    my $p1 = V(@$o0);
-    $p0->[$sel] = $p1->[$sel] = $middle;
-    my $sr0 = Math::Geometry::RandomPlaneFiller::Region->new($o0, $p0);
-    my $sr1 = Math::Geometry::RandomPlaneFiller::Region->new($p1, $o1);
-    $self->_insert($_) for @$objs;
+    my $diagonal = $o1 - $o0;
+    my $selector = $self->[sel] = ($diagonal->[0] > $diagonal->[1] ? 0 : 1);
+    my $middle = 0.5 * ($o0->[$selector] + $o1->[$selector]);
+    my $p0 = Math::Vector::Real::V(@$o1);
+    my $p1 = Math::Vector::Real::V(@$o0);
+    $p0->[$selector] = $p1->[$selector] = $middle;
+    my $sr0 = $self->[sr0] = Math::Geometry::RandomPlaneFiller::Region->new($o0, $p0);
+    my $sr1 = $self->[sr1] = Math::Geometry::RandomPlaneFiller::Region->new($p1, $o1);
+    $self->_insert_into_subtrees(@$objs);
 }
 
-sub _insert {
+sub _insert_into_subtrees {
     my $self = shift;
-    my $shape = shift;
-    if (my $area = $shape->area_of_intersection_with_rectangle($self->[o0], $self->[o1])) {
-        if (my $objs = $self->[objs]) {
-            if (@$objs < max_shapes_per_region) {
-                push @$objs, $shape;
-                $self->[free] -= $area;
-            }
-            $self->_divide;
-        }
-        my $sr0 = $self->[sr0];
-        my $sr1 = $self->[sr1];
-        $sr0->insert($shape);
-        $sr1->insert($shape);
-        $self->[area] = $sr0->[area] + $sr1->[area];
+    my $sr0 = $self->[sr0];
+    my $sr1 = $self->[sr1];
+    for (@_) {
+        $sr0->insert($_);
+        $sr1->insert($_);
     }
+    $self->[free] = $sr0->[free] + $sr1->[free];
 }
 
+sub _merge_unique {
+    my ($u, $v) = @_;
+    @$u or return $v;
+    @$v or return $u;
 
+    my @r;
+    while (@$u) {
+        if (@$v) {
+            my $dir = (Scalar::Util::refaddr($u->[0]) <=> Scalar::Util::refaddr($v->[0]));
+            if ($dir < 0) {
+                push @r, shift @$u;
+            }
+            else {
+                push @r, shift @$v;
+                $dir or shift @$u; # remove duplicates
+            }
+        }
+        else {
+            push @r, @$u;
+            return \@r;
+        }
+    }
+    push @r, @$v;
+    return \@r;
+}
+
+sub find_touching {
+    my ($self, $shape) = @_;
+    if ($shape->is_touching_rectangle($self->[o0], $self->[o1])) {
+        if (my $objs = $self->[objs]) {
+            return [ sort { Scalar::Util::refaddr($a) <=> Scalar::Util::refaddr($b) }
+                     grep { $shape->is_touching_shape($_) }
+                     @$objs ]
+
+        }
+        else {
+            return _merge_unique($self->[sr0]->find_touching($shape),
+                                 $self->[sr1]->find_touching($shape))
+        }
+    }
+    [];
+}
+
+sub find_nearest_to_point {
+    my ($self, $p, $n, $max_dist2) = @_;
+
+    my $d = $p->nearest_in_box($self->[o0], $self->[o1])->dist2($p);
+    $d <= $max_dist2 or return ([], $max_dist2);
+
+    # else...
+    #  working here!
+}
 
 1;
 __END__
