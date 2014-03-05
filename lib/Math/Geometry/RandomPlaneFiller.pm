@@ -251,7 +251,7 @@ sub _insert_into_subtrees {
     $self->[free] = $sr0->[free] + $sr1->[free];
 }
 
-sub _merge_unique {
+sub _merge_unique_shape {
     my ($u, $v) = @_;
     @$u or return $v;
     @$v or return $u;
@@ -287,21 +287,73 @@ sub find_touching {
 
         }
         else {
-            return _merge_unique($self->[sr0]->find_touching($shape),
-                                 $self->[sr1]->find_touching($shape))
+            return _merge_unique_shapes($self->[sr0]->find_touching($shape),
+                                        $self->[sr1]->find_touching($shape))
         }
     }
     [];
 }
 
+sub _merge_unique_pairs {
+    my ($u, $v, $n) = @_;
+    my @r;
+    while (@r < $n) {
+        if (@$u) {
+            if (@$v) {
+                my $dir = ($u->[0][1] <=> $v->[0][1]);
+                if ($dir < 0) {
+                    push @r, shift @$u;
+                }
+                else {
+                    my $pivot = shift @$v;
+                    push @r, $pivot;
+                    shift @$u if $dir == 0 and $pivot->[0] == $u->[0][0]; # remove duplicates
+                }
+            }
+            else {
+                push @r, @{$u}[0 .. $n - @r];
+                last;
+            }
+        }
+        else {
+            push @r, @{$v}[0 .. $n - @r];
+            last;
+        }
+    }
+    return \@r;
+}
+
 sub find_nearest_to_point {
     my ($self, $p, $n, $max_dist2) = @_;
 
-    my $d = $p->nearest_in_box($self->[o0], $self->[o1])->dist2($p);
-    $d <= $max_dist2 or return ([], $max_dist2);
-
-    # else...
-    #  working here!
+    if (my $objs = $self->[objs]) {
+        my @pairs;
+        for (@$objs) {
+            my $d = $_->distance_to_point($p);
+            my $d2 = $d * $d;
+            push @pairs, [$_, $d2] if $d2 < $max_dist2;
+        }
+        @pairs = sort { $a->[1] <=> $b->[1] or
+                        Scalar::Util::refaddr($a->[0]) <=> Scalar::Util::refaddr($b->[0]) } @pairs;
+        return [ @pairs[0 .. $n - 1] ];
+    }
+    else {
+        my @d2 = map ( $p->nearest_in_box($_->[o0], $_->[o1])->dist2($p),
+                       @{$self}[sr0, sr1] );
+        my @pairs;
+        for my $side (sort { $d2[$a] <=> $d2[$b] } (0, 1)) {
+            if ($d2[$side] < $max_dist2) {
+                if (my $pair = $self->[sr0 + $side]->find_nearest_to_point($p, $n, $max_dist2)) {
+                    $max_dist2 = $pair->[$n][1] if @$pair >= $n;
+                    push @pairs, $pair;
+                }
+            }
+        }
+        if (@pairs > 1) {
+            return _merge_unique_pairs(@pairs, $n);
+        }
+        return @pairs;
+    }
 }
 
 1;
