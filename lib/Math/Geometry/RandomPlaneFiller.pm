@@ -7,6 +7,7 @@ use strict;
 use warnings;
 use Scalar::Util qw();
 use Math::Vector::Real;
+use Math::Vector::Real::Random;
 
 sub new {
     my ($class, %opts) = @_;
@@ -27,10 +28,9 @@ sub random_free_point {
     $root->random_free_point;
 }
 
-sub find_touching {
+sub find_touching_shape {
     my ($self, $shape) = @_;
     my $t = $self->{root}->find_touching($shape);
-    (wantarray ? @$t : $t->[0]);
 }
 
 sub insert {
@@ -45,13 +45,14 @@ sub draw_regions {
 
 sub find_nearest_to_point {
     my ($self, $p, $n, $max_dist) = @_;
-    my $root = $self->[root];
-    $n //= 1;
     $max_dist //= $self->{max_dist};
-    my $n = $self->[root]->find_nearest_to_point($p, $n, $max_dist * $max_dist);
-    wantarray ? @$n : $n->[0];
+    $self->{root}->find_nearest_to_point($p, $n || 1, $max_dist * $max_dist);
 }
 
+sub find_touching_circle {
+    my ($self, $p, $r) = @_;
+    $self->{root}->find_nearest_to_point($p, undef, $r * $r);
+}
 
 package Math::Geometry::RandomPlaneFiller::Shape;
 
@@ -99,6 +100,9 @@ use constant o     => 0;
 use constant r     => 1;
 use constant slots => 2;
 
+sub center { shift->[o] }
+sub radius { shift->[r] }
+
 sub new {
     my ($class, $o, $r) = @_;
     my $self = [];
@@ -125,27 +129,27 @@ sub is_touching_point {
 
 sub distance_to_point {
     my ($self, $p) = @_;
-    my $d = $self->[o]->dist2($p) - $self->[r];
+    my $d = $self->[o]->dist($p) - $self->[r];
     $d < 0 ? 0 : $d;
 }
 
 sub distance_to_rectangle {
     my $self = shift;
-    my $n = $self->[c]->nearest_in_box(@_);
-    my $d = $n->dist($self->[o]) - $self->[r];
-    return ($d < 0 ? 0 : $d);
+    my $o = $self->[o];
+    my $d = $o->nearest_in_box(@_)->dist($o) - $self->[r];
+    $d < 0 ? 0 : $d;
 }
 
 sub is_touching_rectangle {
     my $self = shift;
-    my $n = $self->[c]->nearest_in_box(@_);
+    my $n = $self->[o]->nearest_in_box(@_);
     my $r = $self->[r];
     $n->dist2($self->[o]) < $r * $r;
 }
 
 package Math::Geometry::RandomPlaneFiller::Region;
 
-use constant max_shapes_per_region => 10;
+use constant max_shapes_per_region => 5;
 
 use constant o0    => 0; # corner 0
 use constant o1    => 1; # corner 1
@@ -279,81 +283,71 @@ sub _merge_unique_shape {
 
 sub find_touching {
     my ($self, $shape) = @_;
-    if ($shape->is_touching_rectangle($self->[o0], $self->[o1])) {
-        if (my $objs = $self->[objs]) {
-            return [ sort { Scalar::Util::refaddr($a) <=> Scalar::Util::refaddr($b) }
-                     grep { $shape->is_touching_shape($_) }
-                     @$objs ]
-
-        }
-        else {
-            return _merge_unique_shapes($self->[sr0]->find_touching($shape),
-                                        $self->[sr1]->find_touching($shape))
-        }
-    }
-    [];
-}
-
-sub _merge_unique_pairs {
-    my ($u, $v, $n) = @_;
-    my @r;
-    while (@r < $n) {
-        if (@$u) {
-            if (@$v) {
-                my $dir = ($u->[0][1] <=> $v->[0][1]);
-                if ($dir < 0) {
-                    push @r, shift @$u;
+    my @queue; # eliminate recursion
+    my @touching;
+    my %shape_seen;
+    while (1) {
+        if ($shape->is_touching_rectangle($self->[o0], $self->[o1])) {
+            if (my $objs = $self->[objs]) {
+                for my $shape2 (@$objs) {
+                    next if $shape_seen{$shape2}++;
+                    next unless $shape->is_touching_shape($shape2);
+                    return 1 unless wantarray;
+                    push @touching, $shape2;
                 }
-                else {
-                    my $pivot = shift @$v;
-                    push @r, $pivot;
-                    shift @$u if $dir == 0 and $pivot->[0] == $u->[0][0]; # remove duplicates
-                }
+                $self = pop @queue or last;
             }
             else {
-                push @r, @{$u}[0 .. $n - @r];
-                last;
+                push @queue, $self->[sr1];
+                $self = $self->[sr0];
             }
         }
-        else {
-            push @r, @{$v}[0 .. $n - @r];
-            last;
-        }
     }
-    return \@r;
+    return @touching;
 }
 
 sub find_nearest_to_point {
     my ($self, $p, $n, $max_dist2) = @_;
+    my (@queue, @queue_d2);
+    my @top;
+    my %shape_d2;
+    while (1) {
+        if (my $objs = $self->[objs]) {
+            for my $shape (@$objs) {
+                next if exists $shape_d2{$shape}; # remove duplicates
+                my $d = $shape->distance_to_point($p);
+                my $d2 = $shape_d2{$shape} = $d * $d;
 
-    if (my $objs = $self->[objs]) {
-        my @pairs;
-        for (@$objs) {
-            my $d = $_->distance_to_point($p);
-            my $d2 = $d * $d;
-            push @pairs, [$_, $d2] if $d2 < $max_dist2;
-        }
-        @pairs = sort { $a->[1] <=> $b->[1] or
-                        Scalar::Util::refaddr($a->[0]) <=> Scalar::Util::refaddr($b->[0]) } @pairs;
-        return [ @pairs[0 .. $n - 1] ];
-    }
-    else {
-        my @d2 = map ( $p->nearest_in_box($_->[o0], $_->[o1])->dist2($p),
-                       @{$self}[sr0, sr1] );
-        my @pairs;
-        for my $side (sort { $d2[$a] <=> $d2[$b] } (0, 1)) {
-            if ($d2[$side] < $max_dist2) {
-                if (my $pair = $self->[sr0 + $side]->find_nearest_to_point($p, $n, $max_dist2)) {
-                    $max_dist2 = $pair->[$n][1] if @$pair >= $n;
-                    push @pairs, $pair;
+                my @d2 = map $shape_d2{$_}, @top;
+                # print STDERR "top_d2: @d2 <-- $d2\n";
+
+                next unless $d2 < $max_dist2;
+                my $ix = @top;
+                while ($ix and $d2 < $shape_d2{$top[$ix - 1]}) { --$ix }
+                splice @top, $ix, 0, $shape;
+                if (defined $n and @top >= $n) {
+                    pop @top if @top > $n;
+                    $max_dist2 = $shape_d2{$top[-1]};
                 }
             }
         }
-        if (@pairs > 1) {
-            return _merge_unique_pairs(@pairs, $n);
+        else {
+            for my $sr (@{$self}[sr0, sr1]) {
+                my $d2 = $p->nearest_in_box($sr->[o0], $sr->[o1])->dist2($p);
+                if ($d2 <  $max_dist2) {
+                    my $ix = @queue;
+                    while ($ix and $d2 > $queue_d2[$ix - 1]) { --$ix }
+                    splice @queue, $ix, 0, $sr;
+                    splice @queue_d2, $ix, 0, $d2;
+                    # print STDERR "queue_d2: @queue_d2\n";
+                }
+            }
         }
-        return @pairs;
+
+        $self = pop @queue or last;
+        pop(@queue_d2) < $max_dist2 or last;
     }
+    return @top;
 }
 
 1;
