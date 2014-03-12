@@ -49,6 +49,11 @@ sub find_nearest_to_point {
     $self->{root}->find_nearest_to_point($p, $n || 1, $max_dist * $max_dist);
 }
 
+sub find_nearest_custom {
+    my ($self, $finder, $n) = @_;
+    $self->{root}->find_nearest_custom($finder, $n);
+}
+
 sub find_touching_circle {
     my ($self, $p, $r) = @_;
     $self->{root}->find_nearest_to_point($p, undef, $r * $r);
@@ -348,6 +353,75 @@ sub find_nearest_to_point {
         pop(@queue_d2) < $max_dist2 or last;
     }
     return @top;
+}
+
+sub _find_nearest_custom {
+    my ($self, $finder, $n, $max_d) = @_;
+    my @top;
+    my $shape_d;
+    my @queue;
+    my @queue_d;
+    while (1) {
+	if (my $objs = $self->[objs]) {
+	    for my $shape (@$objs) {
+		next if exists $shape_d{$shape};
+		my $d = $shape_d{$shape} = $finder->distance_to_shape($shape);
+		next if !defined $d or (defined $max_d and $d > $max_d);
+		my $ix = @top;
+                while ($ix and $d < $shape_d{$top[$ix - 1]}) { --$ix }
+                splice @top, $ix, 0, $shape;
+                if (defined $n and @top >= $n) {
+                    pop @top if @top > $n;
+                    $max_dist = $shape_d{$top[-1]};
+                }
+	    }
+	}
+    	else {
+	    for my $r (@{$self}[sr0, sr1]) {
+		my $d = $finder->distance_to_box($sr->[o0], $sr->[o1]);
+		next if !defined $d or (defined $max_d and $d > $max_d);
+		my $ix = @queue;
+		while ($ix and $d > $queue_d[$ix - 1]) { --$ix }
+		splice @queue, $ix, 0, $sr;
+		splice @queue_d2, $ix, 0, $d2;
+	    }
+	}
+	$self = pop @queue or last;
+	pop(@queue) < $max_dist or last;
+    }
+    return @top;
+}
+
+package Math::Geometry::RandomPlaneFiller::Finder;
+
+sub distance_to_shape {
+    my ($self, $shape) = @_;
+    die "virtual method 'distance_to_shape' not implemented by class '$class'";
+}
+
+sub distance_to_box {
+    my ($self, $shape) = @_;
+    die "virtual method 'distance_to_box' not implemented by class '$class'";
+}
+
+package Math::Geometry::RandomPlaneFiller::RadiusOfTangentCircunferenceFinder;
+
+# given a circunference C defined by its center $o and a point $p,
+# this class defined the distance to a point $q as the radius of the
+# circunference tangent to C that contains both the points $p and $q
+
+sub new {
+    my ($class, $o, $p) = @_;
+
+    my $v = ($p - $o)->versor;
+    my $n = Math::Vector::Real::V($v[1], -$v[0]);
+    my $self = [$p, $v, $n] = @_;
+    bless $self, $class;
+}
+
+sub distance_to_shape {
+    my ($self, $shape) = @_;
+
 }
 
 1;
