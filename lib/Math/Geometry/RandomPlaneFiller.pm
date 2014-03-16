@@ -49,9 +49,9 @@ sub find_nearest_to_point {
     $self->{root}->find_nearest_to_point($p, $n || 1, $max_dist * $max_dist);
 }
 
-sub find_nearest_custom {
-    my ($self, $finder, $n) = @_;
-    $self->{root}->find_nearest_custom($finder, $n);
+sub find_best_rated {
+    my ($self, $rater, $n) = @_;
+    $self->{root}->find_best_rated($rater, $n);
 }
 
 sub find_touching_circle {
@@ -352,76 +352,135 @@ sub find_nearest_to_point {
         $self = pop @queue or last;
         pop(@queue_d2) < $max_dist2 or last;
     }
-    return @top;
+    return (wantarray ? @top : $top[0]);
 }
 
-sub _find_nearest_custom {
-    my ($self, $finder, $n, $max_d) = @_;
+sub find_best_rated {
+    my ($self, $rater, $n, $max_rate) = @_;
     my @top;
-    my $shape_d;
+    my %shape_rate;
     my @queue;
-    my @queue_d;
+    my @queue_rate;
     while (1) {
 	if (my $objs = $self->[objs]) {
 	    for my $shape (@$objs) {
-		next if exists $shape_d{$shape};
-		my $d = $shape_d{$shape} = $finder->distance_to_shape($shape);
-		next if !defined $d or (defined $max_d and $d > $max_d);
+		next if exists $shape_rate{$shape};
+		my $rate = $shape_rate{$shape} = $rater->rate_shape($shape);
+		next if !defined $rate or (defined $max_rate and $rate > $max_rate);
 		my $ix = @top;
-                while ($ix and $d < $shape_d{$top[$ix - 1]}) { --$ix }
+                while ($ix and $rate < $shape_rate{$top[$ix - 1]}) { --$ix }
                 splice @top, $ix, 0, $shape;
                 if (defined $n and @top >= $n) {
                     pop @top if @top > $n;
-                    $max_dist = $shape_d{$top[-1]};
+                    $max_rate = $shape_rate{$top[-1]};
                 }
 	    }
 	}
     	else {
-	    for my $r (@{$self}[sr0, sr1]) {
-		my $d = $finder->distance_to_box($sr->[o0], $sr->[o1]);
-		next if !defined $d or (defined $max_d and $d > $max_d);
+	    for my $sr (@{$self}[sr0, sr1]) {
+		my $rate = $rater->rate_box($sr->[o0], $sr->[o1]);
+		next if !defined $rate or (defined $max_rate and $rate > $max_rate);
 		my $ix = @queue;
-		while ($ix and $d > $queue_d[$ix - 1]) { --$ix }
+		while ($ix and $rate > $queue_rate[$ix - 1]) { --$ix }
+                warn "before: ".scalar(@queue)."=> rate: ".join('|', @queue_rate)."\n";
 		splice @queue, $ix, 0, $sr;
-		splice @queue_d2, $ix, 0, $d2;
+		splice @queue_rate, $ix, 0, $rate;
+                warn "after: ".scalar(@queue)."=> rate: ".join('|', @queue_rate)."\n";
 	    }
 	}
 	$self = pop @queue or last;
-	pop(@queue) < $max_dist or last;
+        my $rate = pop(@queue_rate);
+        last if defined $max_rate and $rate >= $max_rate;
     }
-    return @top;
+    return (wantarray ? @top : $top[0]);
 }
 
-package Math::Geometry::RandomPlaneFiller::Finder;
+package Math::Geometry::RandomPlaneFiller::Rater;
 
-sub distance_to_shape {
-    my ($self, $shape) = @_;
-    die "virtual method 'distance_to_shape' not implemented by class '$class'";
+sub rate_shape {
+    my $class = ref(shift);
+    die "virtual method 'rate_shape' not implemented by class '$class'";
 }
 
-sub distance_to_box {
-    my ($self, $shape) = @_;
-    die "virtual method 'distance_to_box' not implemented by class '$class'";
+sub rate_box {
+    my $class = ref(shift);
+    die "virtual method 'rate_box' not implemented by class '$class'";
 }
 
-package Math::Geometry::RandomPlaneFiller::RadiusOfTangentCircunferenceFinder;
+package Math::Geometry::RandomPlaneFiller::DiameterOfTangentCircunferenceRater;
 
-# given a circunference C defined by its center $o and a point $p,
-# this class defined the distance to a point $q as the radius of the
-# circunference tangent to C that contains both the points $p and $q
+# given a circunference C defined by its center $o and its radius and a point $q,
+# this class rates another circunference D as the diameter of the circunference
+# tangent to C and D whose center lays on the line containing both $o and $q
 
-sub new {
-    my ($class, $o, $p) = @_;
+use constant p => 0;
+use constant v => 1;
+use constant n => 2;
 
-    my $v = ($p - $o)->versor;
-    my $n = Math::Vector::Real::V($v[1], -$v[0]);
-    my $self = [$p, $v, $n] = @_;
+sub new_from_circle_and_point {
+    my ($class, $o, $r, $q) = @_;
+    my $v = ($q - $o)->versor;
+    my $p = $o + $r * $v;
+    $class->_new($p, $v);
+}
+
+sub _new {
+    my ($class, $p, $v) = @_;
+    my $n = Math::Vector::Real::V($v->[1], -$v->[0]);
+    my $self = [$p, $v, $n];
     bless $self, $class;
 }
 
-sub distance_to_shape {
-    my ($self, $shape) = @_;
+sub rate_shape {
+    my ($self, $circle, $max) = @_;
+    unless ($circle->isa('Math::Geometry::RandomPlaneFiller::Shape::Circle')) {
+        die "bad shape ". ref($circle);
+    }
 
+    my $r0 = $circle->radius;
+    my $c0 = $circle->center - $self->[p];
+    my $x0 = $c0 * $self->[v];
+    my $x0_r0 = $x0 + $r0;
+    return if $x0_r0 <= 0;
+    my $y0 = $c0 * $self->[n];
+    # 2*r = y0^2/(x0+r0) + x0 - r0;
+    return $y0 * $y0 / $x0_r0 + $x0 - $r0;
+}
+
+sub rate_box {
+    my ($self, $p0, $p1) = @_;
+
+    my ($p, $v, $n) = @{$self}[p,v,n];
+    my $p2 = [$p0->[0], $p1->[1]];
+    my $p3 = [$p1->[0], $p0->[0]];
+
+    my ($b0, $b1) = Math::Vector::Real->box(map [$v * $_, $n * $_],
+                                      $p0, $p1, [$p0->[0], $p1->[1]], [$p1->[0], $p0->[0]]);
+
+    return if $b1->[0] <= 0; # at the left of $p
+    my $y;
+    if ($b0->[1] <= 0) {
+        if ($b1->[1] >= 0) {
+            my $x = $b0->[0];
+            return ($x <= 0 ? 0 : $x);
+        }
+        # else take the symetrical to OX
+        $y = -$b1->[1];
+    }
+    else {
+        $y = $b0->[1];
+    }
+
+    my $x;
+    if ($y <= $b1->[0]) {
+        return 2 * $y if $y >= $b0->[0];
+        $x = $b0->[0];
+    }
+    else {
+        $x = $b1->[0];
+    }
+
+    return $x + $y * $y / $x;
 }
 
 1;
