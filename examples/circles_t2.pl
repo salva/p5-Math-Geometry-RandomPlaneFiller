@@ -62,7 +62,7 @@ for (1..1000000) {
         $last_log = $log;
     }
 
-    $filler->insert(Math::Geometry::RandomPlaneFiller::Shape::Circle->new($o, $r));
+    $filler->insert(Math::Geometry::RandomPlaneFiller::Shape::xoCircle->new($o, $r));
 
 }
 
