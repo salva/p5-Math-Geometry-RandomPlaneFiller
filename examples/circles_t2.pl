@@ -31,20 +31,21 @@ for (1..1000000) {
     my $o0 = $o;
     my $r = rand 0.2;
     my ($nearest, $second, $rater);
-    warn "random circle at $o, r=$r\n";
+    print STDERR "random circle at $o, r=$r\n";
     if ($nearest = $filler->find_nearest_to_point($o, 1, $r)) {
         my $nc = $nearest->center;
         my $nr = $nearest->radius;
-        warn "nearest at $nc, r=$nr\n";
+        print STDERR "nearest at $nc, r=$nr\n";
         $rater = Math::Geometry::RandomPlaneFiller::DiameterOfTangentCircunferenceRater
             ->new_from_circle_and_point($nc, $nr, $o);
-        if ($second = $filler->find_best_rated($rater, 1, 2 * $r)) {
+        my $box_rating = $rater->rate_box_inside($filler->box, 2 * $r);
+        if ($second = $filler->find_best_rated($rater, 1, $box_rating)) {
             my $r1 = 0.5 * $rater->rate_shape($second);
             my $sc = $nearest->center;
             my $sr = $nearest->radius;
-            warn "second at $sc, r=$sr, r1=$r1\n";
+            print STDERR "second at $sc, r=$sr, r1=$r1\n";
             if ($r1 < 0.0001 * $r) {
-                print "r1 is too small: $r1\n";
+                print STDERR "r1 is too small: $r1\n";
                 next;
             }
             $r = $r1;
@@ -58,16 +59,16 @@ for (1..1000000) {
     my $log = int(100 * log $_);
     if (1 or $log != $last_log) {
         print STDERR "drawing n: $_\n";
-        draw($_, $o, $o0, $r, [grep defined, $nearest, $second]);
+        draw($_, $o, $o0, $r, [grep defined, $nearest, $second], $rater);
         $last_log = $log;
     }
 
-    $filler->insert(Math::Geometry::RandomPlaneFiller::Shape::xoCircle->new($o, $r));
+    $filler->insert(Math::Geometry::RandomPlaneFiller::Shape::Circle->new($o, $r));
 
 }
 
 sub draw {
-    my ($n, $o, $o0, $r, $tangents) = @_;
+    my ($n, $o, $o0, $r, $tangents, $rater) = @_;
     my $im = GD::Image->new(1000, 1000);
     my $white = $im->colorAllocate(255,255,255);
     my $red = $im->colorAllocate(255, 0, 0);
@@ -81,6 +82,11 @@ sub draw {
         $im->filledRectangle((map { 1000 * $_ } @$p0, @$p1), ($gix < 0 ? $red : $gray[int $gix]));
         $im->rectangle((map { 1000 * $_ } @$p0, @$p1, $white));
         # $im->string(GD::gdSmallFont, (map 1000*$_, @$p0), sprintf("%d",$prob * 100), $blue);
+        if ($rater) {
+            my $rate = $rater->rate_box($p0, $p1);
+            my $txt = (defined $rate ? int($rate * 100) : 'U');
+            $im->string(GD::gdSmallFont,  (map 1000*$_, @$p0), $txt, $blue);
+        }
     };
 
     $filler->draw_regions($draw_region);

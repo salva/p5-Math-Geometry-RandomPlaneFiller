@@ -17,6 +17,8 @@ sub new {
     my ($o0, $o1) = Math::Vector::Real->box($o, $o + $d);
     my $self = { root => Math::Geometry::RandomPlaneFiller::Region->new($o0, $o1),
                  max_dist => ($o1 - $o0)->norm,
+                 o0 => $o0,
+                 o1 => $o1,
                };
     bless $self, $class;
 }
@@ -57,6 +59,11 @@ sub find_best_rated {
 sub find_touching_circle {
     my ($self, $p, $r) = @_;
     $self->{root}->find_nearest_to_point($p, undef, $r * $r);
+}
+
+sub box {
+    my $self = shift;
+    map $self->{$_}->clone, qw(o0 o1);
 }
 
 package Math::Geometry::RandomPlaneFiller::Shape;
@@ -382,10 +389,10 @@ sub find_best_rated {
 		next if !defined $rate or (defined $max_rate and $rate > $max_rate);
 		my $ix = @queue;
 		while ($ix and $rate > $queue_rate[$ix - 1]) { --$ix }
-                warn "before: ".scalar(@queue)."=> rate: ".join('|', @queue_rate)."\n";
+                # print STDERR "before: ".scalar(@queue)."=> rate: ".join('|', @queue_rate)."\n";
 		splice @queue, $ix, 0, $sr;
 		splice @queue_rate, $ix, 0, $rate;
-                warn "after: ".scalar(@queue)."=> rate: ".join('|', @queue_rate)."\n";
+                # print STDERR "after: ".scalar(@queue)."=> rate: ".join('|', @queue_rate)."\n";
 	    }
 	}
 	$self = pop @queue or last;
@@ -455,7 +462,10 @@ sub rate_box {
     my $p3 = [$p1->[0], $p0->[0]];
 
     my ($b0, $b1) = Math::Vector::Real->box(map [$v * $_, $n * $_],
-                                      $p0, $p1, [$p0->[0], $p1->[1]], [$p1->[0], $p0->[0]]);
+                                            map $_ - $p,
+                                            $p0, $p1,
+                                            [$p0->[0], $p1->[1]],
+                                            [$p1->[0], $p0->[0]]);
 
     return if $b1->[0] <= 0; # at the left of $p
     my $y;
@@ -481,6 +491,26 @@ sub rate_box {
     }
 
     return $x + $y * $y / $x;
+}
+
+sub _rate_line {
+    my ($self, $q, $in, $max_rate) = @_;
+    my $p = $self->[p];
+    my $v = $self->[v];
+    my $d = ($q - $p) * $in;
+    return 0 if $d < 0;
+    my $f = 0.5 * (1 - $in * $v);
+    return $max_rate if defined($max_rate) ? $max_rate * $f <= $d : $f;
+    return $d / $f;
+}
+
+sub rate_box_inside {
+    my ($self, $p0, $p1, $max_rate) = @_;
+    $max_rate = $self->_rate_line($p0, [ 1,  0], $max_rate);
+    $max_rate = $self->_rate_line($p0, [ 0,  1], $max_rate);
+    $max_rate = $self->_rate_line($p1, [-1,  0], $max_rate);
+    $max_rate = $self->_rate_line($p1, [ 0, -1], $max_rate);
+    $max_rate;
 }
 
 1;
