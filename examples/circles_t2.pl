@@ -13,6 +13,7 @@ my $max_r = 1;
 system "rm out-*.png 2>/dev/null";
 
 my $filler = Math::Geometry::RandomPlaneFiller->new;
+my ($b0, $b1) = $filler->box;
 
 my @circles;
 
@@ -28,30 +29,36 @@ my @circles;
 my $last_log = -1;
 for (1..1000000) {
     my $o = $filler->random_free_point or last;
-    my $o0 = $o;
     my $r = rand 0.2;
+    my ($o0, $r0) = ($o, $r);
     my ($nearest, $second, $rater);
+    my $p_rater;
     print STDERR "random circle at $o, r=$r\n";
-    if ($nearest = $filler->find_nearest_to_point($o, 1, $r)) {
-        my $nc = $nearest->center;
-        my $nr = $nearest->radius;
-        print STDERR "nearest at $nc, r=$nr\n";
+    my ($b, $rb) = $o0->nearest_in_box_border($b0, $b1);
+    $rb > 0 or next;
+    my $v;
+    if ($nearest = $filler->find_nearest_to_point($o, 1, $rb)) {
+        $v = ($o - $nearest->center)->versor;
+        $b = $nearest->center + $v * $nearest->radius;
         $rater = Math::Geometry::RandomPlaneFiller::DiameterOfTangentCircunferenceRater
-            ->new_from_circle_and_point($nc, $nr, $o);
-        my $box_rating = $rater->rate_box_inside($filler->box, 2 * $r);
-        if ($second = $filler->find_best_rated($rater, 1, $box_rating)) {
+            ->new_from_point_and_vector($b, $v);
+    }
+    elsif ($rb < $r) {
+        $v = ($o - $b)->versor;
+        $rater = Math::Geometry::RandomPlaneFiller::DiameterOfTangentCircunferenceRater
+            ->new_from_point_and_vector($b, $o - $b);
+    }
+    if ($rater) {
+        $r = 0.5 * $rater->rate_box_inside($b0, $b1, 2 * $r);
+        if ($second = $filler->find_best_rated($rater, 1, 2 * $r)) {
             my $r1 = 0.5 * $rater->rate_shape($second);
-            my $sc = $nearest->center;
-            my $sr = $nearest->radius;
-            print STDERR "second at $sc, r=$sr, r1=$r1\n";
             if ($r1 < 0.0001 * $r) {
                 print STDERR "r1 is too small: $r1\n";
                 next;
             }
             $r = $r1;
         }
-        my $v = ($o - $nc)->versor;
-        $o = $nc + ($nr + $r) * $v;
+        $o = $b + $r * $v;
     }
 
     push @circles, [$o, $r];

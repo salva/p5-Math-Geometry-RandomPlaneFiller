@@ -431,6 +431,11 @@ sub new_from_circle_and_point {
     $class->_new($p, $v);
 }
 
+sub new_from_point_and_vector {
+    my ($class, $p, $v) = @_;
+    $class->_new($p, $v->versor);
+}
+
 sub _new {
     my ($class, $p, $v) = @_;
     my $n = Math::Vector::Real::V($v->[1], -$v->[0]);
@@ -497,7 +502,7 @@ sub _rate_line {
     my ($self, $q, $in, $max_rate) = @_;
     my $p = $self->[p];
     my $v = $self->[v];
-    my $d = ($q - $p) * $in;
+    my $d = ($p - $q) * $in;
     return 0 if $d < 0;
     my $f = 0.5 * (1 - $in * $v);
     return $max_rate if defined($max_rate) ? $max_rate * $f <= $d : $f;
