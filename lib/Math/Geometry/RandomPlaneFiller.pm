@@ -52,8 +52,8 @@ sub find_nearest_to_point {
 }
 
 sub find_best_rated {
-    my ($self, $rater, $n) = @_;
-    $self->{root}->find_best_rated($rater, $n);
+    my ($self, $rater, $n, $max_rating) = @_;
+    $self->{root}->find_best_rated($rater, $n, $max_rating);
 }
 
 sub find_touching_circle {
