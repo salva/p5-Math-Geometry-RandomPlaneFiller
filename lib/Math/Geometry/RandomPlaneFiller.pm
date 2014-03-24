@@ -9,6 +9,8 @@ use Scalar::Util qw();
 use Math::Vector::Real;
 use Math::Vector::Real::Random;
 
+our $debug;
+
 sub new {
     my ($class, %opts) = @_;
     my $o = delete $opts{o} // [0, 0];
@@ -175,6 +177,17 @@ use constant slots => 9; #
 
 sub is_full { shift->[free] <= 0 }
 
+sub _to_string {
+    my ($self, @more) = @_;
+    my $objs = $self->[objs];
+    my $in = ($objs ? sprintf("#%d", scalar @$objs) : "sel: ".$self->[sel]);
+    my $more = (@more ? join(", ", '', @more) : '');
+    sprintf("[%s-%s, free: %d%%, %s%s]",
+            $self->[o0], $self->[o1],
+            $self->[free] * $self->[iarea] * 100,
+            $in, $more);
+}
+
 sub new {
     my ($class, $o0, $o1) = @_;
     my $d = $o1 - $o0;
@@ -330,7 +343,7 @@ sub find_nearest_to_point {
                 my $d = $shape->distance_to_point($p);
                 my $d2 = $shape_d2{$shape} = $d * $d;
 
-                my @d2 = map $shape_d2{$_}, @top;
+                # my @d2 = map $shape_d2{$_}, @top;
                 # print STDERR "top_d2: @d2 <-- $d2\n";
 
                 next unless $d2 < $max_dist2;
@@ -386,15 +399,25 @@ sub find_best_rated {
     	else {
 	    for my $sr (@{$self}[sr0, sr1]) {
 		my $rate = $rater->rate_box($sr->[o0], $sr->[o1]);
+                if ($debug) {
+                    print STDERR "rating: ", $sr->_to_string("rate: ".($rate//'<undef>')), "\n";
+                }
 		next if !defined $rate or (defined $max_rate and $rate > $max_rate);
 		my $ix = @queue;
 		while ($ix and $rate > $queue_rate[$ix - 1]) { --$ix }
-                # print STDERR "before: ".scalar(@queue)."=> rate: ".join('|', @queue_rate)."\n";
 		splice @queue, $ix, 0, $sr;
 		splice @queue_rate, $ix, 0, $rate;
-                # print STDERR "after: ".scalar(@queue)."=> rate: ".join('|', @queue_rate)."\n";
 	    }
 	}
+
+        if ($debug) {
+            print STDERR
+                "max_rate: ", ($max_rate // '<undef>'), "\n",
+                    "queue: ",
+                        join(", ", map { $queue[$_]->_to_string("rate: $queue_rate[$_]") } 0..$#queue),
+                            "\n";
+        }
+
 	$self = pop @queue or last;
         my $rate = pop(@queue_rate);
         last if defined $max_rate and $rate >= $max_rate;
@@ -456,7 +479,8 @@ sub rate_shape {
     return if $x0_r0 <= 0;
     my $y0 = $c0 * $self->[n];
     # 2*r = y0^2/(x0+r0) + x0 - r0;
-    return $y0 * $y0 / $x0_r0 + $x0 - $r0;
+    my $rating = $y0 * $y0 / $x0_r0 + $x0 - $r0;
+    $rating >= 0 ? $rating : undef;
 }
 
 sub rate_box {
@@ -470,7 +494,7 @@ sub rate_box {
                                             map $_ - $p,
                                             $p0, $p1,
                                             [$p0->[0], $p1->[1]],
-                                            [$p1->[0], $p0->[0]]);
+                                            [$p1->[0], $p0->[1]]);
 
     return if $b1->[0] <= 0; # at the left of $p
     my $y;
