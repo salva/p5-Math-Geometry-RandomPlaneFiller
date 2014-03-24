@@ -64,10 +64,23 @@ for (1..1000000) {
     push @circles, [$o, $r];
 
     my $log = int(100 * log $_);
-    if (1 or $log != $last_log) {
+    if ($log != $last_log) {
         print STDERR "drawing n: $_\n";
-        draw($_, $o, $o0, $r, [grep defined, $nearest, $second], $rater);
+        draw($_, $o, $o0, $r, [], $rater); # grep defined, $nearest, $second], $rater);
         $last_log = $log;
+    }
+
+    if (1) {
+        my $rs = $r * .99999;
+        my ($b, $rb) = $o->nearest_in_box_border($b0, $b1);
+        if (defined $rb and $rb < $rs) {
+            warn "too close to border => b: $b, rb: $rb, o: $o, r: $r\n";
+        }
+        if (my $n = $filler->find_nearest_to_point($o, 1, $rs)) {
+            my $nr = $n->radius;
+            my $nc = $n->center;
+            warn "too close to circle => nc: $nc, nr: $nr, o: $o, r: $r\n";
+        }
     }
 
     $filler->insert(Math::Geometry::RandomPlaneFiller::Shape::Circle->new($o, $r));
@@ -81,19 +94,20 @@ sub draw {
     my $red = $im->colorAllocate(255, 0, 0);
     my $blue = $im->colorAllocate(0, 0, 255);
     my $green = $im->colorAllocate(0, 255, 0);
+    my $orange = $im->colorAllocate(255, 200, 100);
     my @gray = map $im->colorAllocate(($_/100 * 255) x 3), 0..100;
 
     my $draw_region = sub {
         my ($p0, $p1, $prob) = @_;
         my $gix = int($prob * 100);
-        $im->filledRectangle((map { 1000 * $_ } @$p0, @$p1), ($gix < 0 ? $red : $gray[int $gix]));
+        $im->filledRectangle((map { 1000 * $_ } @$p0, @$p1), ($gix < 0 ? $orange : $gray[int $gix]));
         $im->rectangle((map { 1000 * $_ } @$p0, @$p1, $white));
         # $im->string(GD::gdSmallFont, (map 1000*$_, @$p0), sprintf("%d",$prob * 100), $blue);
-        if ($rater) {
-            my $rate = $rater->rate_box($p0, $p1);
-            my $txt = (defined $rate ? int($rate * 100) : 'U');
-            $im->string(GD::gdSmallFont,  (map 1000*$_, @$p0), $txt, $blue);
-        }
+        #if ($rater) {
+        #    my $rate = $rater->rate_box($p0, $p1);
+        #    my $txt = (defined $rate ? int($rate * 100) : 'U');
+        #    $im->string(GD::gdSmallFont,  (map 1000*$_, @$p0), $txt, $blue);
+        #}
     };
 
     $filler->draw_regions($draw_region);
