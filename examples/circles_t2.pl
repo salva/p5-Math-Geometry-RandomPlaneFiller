@@ -34,7 +34,8 @@ for (1..1000000) {
     my ($nearest, $second, $rater);
     my $p_rater;
     print STDERR "random circle at $o, r=$r\n";
-    my ($b, $rb) = $o0->nearest_in_box_border($b0, $b1);
+    my $b = $o0->nearest_in_box_border($b0, $b1);
+    my $rb = $o0->dist2($b);
     $rb > 0 or next;
     my $v;
     if ($nearest = $filler->find_nearest_to_point($o, 1, $rb)) {
@@ -94,14 +95,18 @@ sub draw {
     my $red = $im->colorAllocate(255, 0, 0);
     my $blue = $im->colorAllocate(0, 0, 255);
     my $green = $im->colorAllocate(0, 255, 0);
-    my $orange = $im->colorAllocate(255, 200, 100);
+    my $orange = $im->colorAllocate(200, 100, 50);
+    my $black = $im->colorAllocate(0, 0, 0);
+
     my @gray = map $im->colorAllocate(($_/100 * 255) x 3), 0..100;
 
     my $draw_region = sub {
         my ($p0, $p1, $prob) = @_;
         my $gix = int($prob * 100);
-        $im->filledRectangle((map { 1000 * $_ } @$p0, @$p1), ($gix < 0 ? $orange : $gray[int $gix]));
-        $im->rectangle((map { 1000 * $_ } @$p0, @$p1, $white));
+
+        $im->filledRectangle((map { 1000 * $_ } @$p0, @$p1), ($gix < 0 ? $red : $gray[int $gix]));
+        #$im->rectangle((map { 1000 * $_ } @$p0, @$p1, $red));
+
         # $im->string(GD::gdSmallFont, (map 1000*$_, @$p0), sprintf("%d",$prob * 100), $blue);
         #if ($rater) {
         #    my $rate = $rater->rate_box($p0, $p1);
@@ -114,21 +119,22 @@ sub draw {
 
     for my $circle (@circles) {
         my ($o, $r) = @$circle;
-        $im->filledEllipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $red);
+        # $im->filledEllipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $red);
+        $im->ellipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $white);
     }
 
     for my $tangent (@$tangents) {
         my ($o, $r) = ($tangent->center, $tangent->radius);
-        $im->filledEllipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $green);
+        $im->ellipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $green);
     }
 
 
     if (defined $o) {
-        # $im->ellipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $blue);
-        # $im->filledEllipse((map { $_ * 1000 } @$o), 5, 5, $blue);
+        $im->ellipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $blue);
+        $im->filledEllipse((map { $_ * 1000 } @$o), 5, 5, $orange);
     }
     if (defined $o0) {
-        # $im->filledEllipse((map { $_ * 1000 } @$o0), 5, 5, $blue);
+        $im->filledEllipse((map { $_ * 1000 } @$o0), 5, 5, $black);
     }
 
     open my $fh, ">", sprintf "out-%07d.png", $n;
