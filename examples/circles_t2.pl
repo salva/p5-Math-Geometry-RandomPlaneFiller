@@ -8,7 +8,10 @@ use Math::Geometry::RandomPlaneFiller;
 
 use GD::Image;
 
+my $width = 960;
+
 my $max_r = 1;
+my $sep_regions = (shift(@ARGV) ? 1 : 0);
 
 system "rm out-*.png 2>/dev/null";
 
@@ -33,7 +36,7 @@ for (1..1000000) {
     my ($o0, $r0) = ($o, $r);
     my ($nearest, $second, $rater);
     my $p_rater;
-    print STDERR "random circle at $o, r=$r\n";
+    # print STDERR "random circle at $o, r=$r\n";
     my $b = $o0->nearest_in_box_border($b0, $b1);
     my $rb = $o0->dist2($b);
     $rb > 0 or next;
@@ -54,7 +57,7 @@ for (1..1000000) {
         if ($second = $filler->find_best_rated($rater, 1, 2 * $r)) {
             my $r1 = 0.5 * $rater->rate_shape($second);
             if ($r1 < 0.0001 * $r) {
-                print STDERR "r1 is too small: $r1\n";
+                # print STDERR "r1 is too small: $r1\n";
                 next;
             }
             $r = $r1;
@@ -67,7 +70,7 @@ for (1..1000000) {
     my $log = int(100 * log $_);
     if ($log != $last_log) {
         print STDERR "drawing n: $_\n";
-        draw($_, $o, $o0, $r, [], $rater); # grep defined, $nearest, $second], $rater);
+        draw($_, $o, $o0, $r, [grep defined, $nearest, $second], $rater);
         $last_log = $log;
     }
 
@@ -90,7 +93,7 @@ for (1..1000000) {
 
 sub draw {
     my ($n, $o, $o0, $r, $tangents, $rater) = @_;
-    my $im = GD::Image->new(1000, 1000);
+    my $im = GD::Image->new($width * ($sep_regions ? 2 : 1), $width);
     my $white = $im->colorAllocate(255,255,255);
     my $red = $im->colorAllocate(255, 0, 0);
     my $blue = $im->colorAllocate(0, 0, 255);
@@ -103,38 +106,41 @@ sub draw {
     my $draw_region = sub {
         my ($p0, $p1, $prob) = @_;
         my $gix = int($prob * 100);
+        $im->filledRectangle((map $width * $_, $p0->[0] + $sep_regions, $p0->[1], $p1->[0] + $sep_regions, $p1->[1]),
+                             ($gix < 0 ? $red : $gray[int $gix]));
 
-        $im->filledRectangle((map { 1000 * $_ } @$p0, @$p1), ($gix < 0 ? $red : $gray[int $gix]));
-        #$im->rectangle((map { 1000 * $_ } @$p0, @$p1, $red));
+        # (map { $width * $_ } @$p0, @$p1), ($gix < 0 ? $red : $gray[int $gix]));
+        #$im->rectangle((map { $width * $_ } @$p0, @$p1, $red));
 
-        # $im->string(GD::gdSmallFont, (map 1000*$_, @$p0), sprintf("%d",$prob * 100), $blue);
+        # $im->string(GD::gdSmallFont, (map $width*$_, @$p0), sprintf("%d",$prob * 100), $blue);
         #if ($rater) {
         #    my $rate = $rater->rate_box($p0, $p1);
         #    my $txt = (defined $rate ? int($rate * 100) : 'U');
-        #    $im->string(GD::gdSmallFont,  (map 1000*$_, @$p0), $txt, $blue);
+        #    $im->string(GD::gdSmallFont,  (map $width*$_, @$p0), $txt, $blue);
         #}
     };
 
     $filler->draw_regions($draw_region);
 
+    $im->filledRectangle(0, 0, $width, $width, $black) if $sep_regions;
+
     for my $circle (@circles) {
         my ($o, $r) = @$circle;
-        # $im->filledEllipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $red);
-        $im->ellipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $white);
+        # $im->filledEllipse((map { $_ * $width } @$o, 2*$r, 2*$r), $red);
+        $im->ellipse((map { $_ * $width } @$o, 2*$r, 2*$r), $white);
     }
 
     for my $tangent (@$tangents) {
         my ($o, $r) = ($tangent->center, $tangent->radius);
-        $im->ellipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $green);
+        $im->ellipse((map { $_ * $width } @$o, 2*$r, 2*$r), $green);
     }
-
 
     if (defined $o) {
-        $im->ellipse((map { $_ * 1000 } @$o, 2*$r, 2*$r), $blue);
-        $im->filledEllipse((map { $_ * 1000 } @$o), 5, 5, $orange);
+        $im->ellipse((map { $_ * $width } @$o, 2*$r, 2*$r), $blue);
+        $im->filledEllipse((map { $_ * $width } @$o), 5, 5, $orange);
     }
     if (defined $o0) {
-        $im->filledEllipse((map { $_ * 1000 } @$o0), 5, 5, $black);
+        $im->filledEllipse((map { $_ * $width } @$o0), 5, 5, $black);
     }
 
     open my $fh, ">", sprintf "out-%07d.png", $n;
